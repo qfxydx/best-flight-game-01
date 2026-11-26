@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ridge Runner — a bush-plane courier run</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; padding: 0; background: #101623; height: 100%; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #stage { position: relative; width: min(100vw, 177.78vh); aspect-ratio: 16 / 9; }
+  canvas { width: 100%; height: 100%; display: block; background: #2b3a67; }
+  #hint {
+    position: absolute; left: 0; right: 0; bottom: 6px; text-align: center;
+    color: rgba(255, 233, 176, 0.75); font: 12px "Courier New", monospace;
+    pointer-events: none; text-shadow: 0 1px 2px #000;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="game" width="1280" height="720"></canvas>
+  <div id="hint">↑ ↓ pitch &nbsp;·&nbsp; ← → throttle &nbsp;·&nbsp; SPACE brake &nbsp;·&nbsp; A autopilot &nbsp;·&nbsp; P pause &nbsp;·&nbsp; R restart</div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
