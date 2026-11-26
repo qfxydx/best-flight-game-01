@@ -85,6 +85,34 @@ export class Renderer {
     for (let i = 0; i < 5; i += 1) {
       this.birds.push({ x: this.cloudRand() * 12000, y: 120 + this.cloudRand() * 160, s: 6 + this.cloudRand() * 5 });
     }
+    // Livestock: grazing herds along the valley floor, fixed by a seeded
+    // random so every run places the same animals in the same spots.
+    // Two herds sit in the cover frame (near ring 1), one past runway 1, one
+    // on the riverbank, one mid-valley, one past runway 2 for the end shot.
+    this.pastureRand = makeRandom(20261127);
+    const pastureSpots = [
+      { x: 800, herd: ['cow', 'sheep', 'sheep', 'sheep'], fence: null, hay: null },
+      { x: 1300, herd: ['cow', 'cow', 'sheep', 'sheep', 'sheep'], fence: [1240, 1520], hay: 1420 },
+      { x: 1760, herd: ['cow', 'sheep', 'sheep', 'sheep'], fence: null, hay: null },
+      { x: 4150, herd: ['sheep', 'sheep', 'sheep'], fence: null, hay: 4180 },
+      { x: 5600, herd: ['cow', 'sheep', 'sheep', 'sheep', 'sheep'], fence: null, hay: null },
+      { x: 10320, herd: ['cow', 'sheep', 'sheep'], fence: [10260, 10390], hay: null },
+    ];
+    this.pastures = pastureSpots.map((spot) => ({
+      x: spot.x,
+      fence: spot.fence,
+      hay: spot.hay,
+      animals: spot.herd.map((kind) => ({
+        kind,
+        dx: (this.pastureRand() - 0.5) * 90,
+        face: this.pastureRand() > 0.5 ? 1 : -1,
+        phase: this.pastureRand() * Math.PI * 2,
+        patch: this.pastureRand(),
+      })),
+    }));
+    // Dirt tracks from the ground line down to the frame bottom, so the
+    // lower half of the valley floor has a path in it.
+    this.tracks = [1330, 10330];
   }
 
   render(state) {
@@ -103,7 +131,7 @@ export class Renderer {
     // The low sun draws over the ranges, so its disc is never lost behind a
     // peak: the halo reads as dusk light over the ridge, not a hole in it.
     this.drawSun();
-    this.drawGround(world, camera);
+    this.drawGround(world, camera, time);
     this.drawRings(world, camera, time, plane);
     this.drawPlane(plane, camera, time);
     this.drawParticles(particles);
@@ -245,7 +273,7 @@ export class Renderer {
     }
   }
 
-  drawGround(world, camera) {
+  drawGround(world, camera, time) {
     const { ctx } = this;
     const groundY = (wx) => this.groundScreenY(world, camera, wx);
     // Valley floor: field strips that alternate with distance, so the ground reads.
@@ -393,8 +421,203 @@ export class Renderer {
         ctx.fill();
       }
     }
+    // Grazing livestock, fences and dirt tracks on the valley floor.
+    this.drawLivestock(world, camera, time, groundY);
     this.drawRunway(world, camera, WORLD.runway1, '09');
     this.drawRunway(world, camera, WORLD.runway2, '27');
+  }
+
+  drawLivestock(world, camera, time, groundY) {
+    const { ctx } = this;
+    // Dirt tracks: narrow dusty bands from the ground line down to the frame
+    // bottom, drawn the same way as the road, so the lower half of the floor
+    // reads as worked land with a path through it.
+    for (const tx of this.tracks) {
+      const rx0 = (tx - camera.x) * SCALE_X * camera.zoom;
+      const rx1 = (tx + 22 - camera.x) * SCALE_X * camera.zoom;
+      if (rx1 < 0 || rx0 > VIEW.width) continue;
+      ctx.fillStyle = COLORS.trackDust;
+      ctx.beginPath();
+      ctx.moveTo(Math.max(0, rx0), groundY(tx));
+      for (let sx = Math.max(0, rx0); sx <= Math.min(VIEW.width, rx1); sx += 8) {
+        const wx = camera.x + sx / (SCALE_X * camera.zoom);
+        ctx.lineTo(sx, groundY(wx));
+      }
+      ctx.lineTo(Math.min(VIEW.width, rx1), VIEW.height);
+      ctx.lineTo(Math.max(0, rx0), VIEW.height);
+      ctx.closePath();
+      ctx.fill();
+      // Wheel ruts down the track.
+      ctx.strokeStyle = COLORS.trackRut;
+      ctx.lineWidth = 2;
+      for (const off of [7, 15]) {
+        const sx = rx0 + off * SCALE_X * camera.zoom;
+        if (sx < 0 || sx > VIEW.width) continue;
+        ctx.beginPath();
+        ctx.moveTo(sx, groundY(tx + off));
+        ctx.lineTo(sx, VIEW.height);
+        ctx.stroke();
+      }
+    }
+    // Wooden fences: short runs of posts and two rails along the ground.
+    for (const group of this.pastures) {
+      if (!group.fence) continue;
+      const [f0, f1] = group.fence;
+      const p0 = (f0 - camera.x) * SCALE_X * camera.zoom;
+      const p1 = (f1 - camera.x) * SCALE_X * camera.zoom;
+      if (p1 < -20 || p0 > VIEW.width + 20) continue;
+      const tops = [];
+      ctx.strokeStyle = COLORS.fenceWood;
+      ctx.lineWidth = 2;
+      for (let wx = f0; wx <= f1; wx += 14) {
+        const sx = (wx - camera.x) * SCALE_X * camera.zoom;
+        const sy = groundY(wx);
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx, sy - 13);
+        ctx.stroke();
+        tops.push([sx, sy]);
+      }
+      ctx.lineWidth = 2;
+      for (const drop of [5, 10]) {
+        ctx.beginPath();
+        for (let i = 0; i < tops.length; i += 1) {
+          const [sx, sy] = tops[i];
+          if (i === 0) ctx.moveTo(sx, sy - drop);
+          else ctx.lineTo(sx, sy - drop);
+        }
+        ctx.stroke();
+      }
+    }
+    // Haystacks: gold cones with a few strokes, beside the herds that have one.
+    for (const group of this.pastures) {
+      if (group.hay === null || group.hay === undefined) continue;
+      const sx = (group.hay - camera.x) * SCALE_X * camera.zoom;
+      if (sx < -30 || sx > VIEW.width + 30) continue;
+      const sy = groundY(group.hay);
+      ctx.fillStyle = COLORS.hayGold;
+      ctx.beginPath();
+      ctx.moveTo(sx - 15, sy);
+      ctx.quadraticCurveTo(sx - 12, sy - 22, sx, sy - 26);
+      ctx.quadraticCurveTo(sx + 12, sy - 22, sx + 15, sy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = COLORS.hayDark;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sx - 6, sy - 4);
+      ctx.lineTo(sx - 3, sy - 16);
+      ctx.moveTo(sx + 5, sy - 3);
+      ctx.lineTo(sx + 2, sy - 15);
+      ctx.stroke();
+    }
+    // The herds themselves, standing on the ground line. Heads bob slowly on
+    // game time, so the graze is the same on every run.
+    for (const group of this.pastures) {
+      for (const a of group.animals) {
+        const wx = group.x + a.dx;
+        if (world.runwayAt(wx) !== 0 || world.isRiver(wx)) continue;
+        const sx = (wx - camera.x) * SCALE_X * camera.zoom;
+        if (sx < -30 || sx > VIEW.width + 30) continue;
+        const sy = groundY(wx);
+        if (a.kind === 'cow') this.drawCow(sx, sy, a, time);
+        else this.drawSheep(sx, sy, a, time);
+      }
+      // Grass tufts beside each herd, so the ground under them is not bare.
+      for (const off of [-30, 12, 34]) {
+        const wx = group.x + off;
+        const sx = (wx - camera.x) * SCALE_X * camera.zoom;
+        if (sx < -10 || sx > VIEW.width + 10) continue;
+        const sy = groundY(wx);
+        ctx.strokeStyle = '#4a7a3e';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx - 3, sy - 7);
+        ctx.moveTo(sx + 2, sy);
+        ctx.lineTo(sx + 2, sy - 9);
+        ctx.moveTo(sx + 4, sy);
+        ctx.lineTo(sx + 6, sy - 6);
+        ctx.stroke();
+      }
+    }
+  }
+
+  drawCow(sx, sy, a, time) {
+    const { ctx } = this;
+    const bob = Math.sin(time * 1.1 + a.phase) * 1.5;
+    const front = sx + a.face * 13;
+    // Legs.
+    ctx.strokeStyle = COLORS.cowBlack;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (const lx of [-9, -3, 4, 9]) {
+      ctx.moveTo(sx + lx, sy - 5);
+      ctx.lineTo(sx + lx, sy);
+    }
+    ctx.stroke();
+    // Body: brown, or white with black patches.
+    const coat = a.patch > 0.5 ? COLORS.cowBrown : COLORS.cowWhite;
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy - 10, 13, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (a.patch <= 0.5) {
+      ctx.fillStyle = COLORS.cowBlack;
+      ctx.beginPath();
+      ctx.ellipse(sx - 5, sy - 12, 5, 3.5, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(sx + 6, sy - 8, 4, 3, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Tail with a tuft.
+    ctx.strokeStyle = coat === COLORS.cowWhite ? COLORS.cowBlack : COLORS.cowBrown;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx - a.face * 13, sy - 13);
+    ctx.lineTo(sx - a.face * 15, sy - 4);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.cowBlack;
+    ctx.beginPath();
+    ctx.arc(sx - a.face * 15, sy - 3, 2, 0, Math.PI * 2);
+    ctx.fill();
+    // Lowered grazing head.
+    ctx.fillStyle = coat;
+    ctx.beginPath();
+    ctx.ellipse(front, sy - 4 + bob, 5, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e8c8a8';
+    ctx.beginPath();
+    ctx.ellipse(front + a.face * 3, sy - 3 + bob, 2.5, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawSheep(sx, sy, a, time) {
+    const { ctx } = this;
+    const bob = Math.sin(time * 1.4 + a.phase) * 1.5;
+    const front = sx + a.face * 9;
+    // Legs.
+    ctx.strokeStyle = COLORS.sheepDark;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const lx of [-5, -1, 3, 6]) {
+      ctx.moveTo(sx + lx, sy - 4);
+      ctx.lineTo(sx + lx, sy);
+    }
+    ctx.stroke();
+    // Woolly body: three overlapping puffs.
+    ctx.fillStyle = COLORS.sheepWool;
+    for (const [ox, oy, r] of [[-4, -8, 5], [2, -9, 5.5], [6, -7, 4.5]]) {
+      ctx.beginPath();
+      ctx.arc(sx + ox, sy + oy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Dark grazing head, lowered.
+    ctx.fillStyle = COLORS.sheepDark;
+    ctx.beginPath();
+    ctx.ellipse(front, sy - 3 + bob, 3.5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   drawVillage(world, camera, groundY) {
